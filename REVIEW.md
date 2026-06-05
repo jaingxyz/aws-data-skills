@@ -44,18 +44,20 @@ Three skills, nine reviews (open-source-security + code-review + AutoCR fidelity
 3. **(lakehouse-redshift) Path A LF grants omit bucket-nested catalog DESCRIBE.** Inconsistent with deploy script and reference snippet. Customers may hit confusing downstream errors. **Fixed in this commit.**
 4. **(lakehouse-redshift) S3 Tables to Lake Formation integration prerequisite undocumented.** New-account customers will see no `s3tablescatalog` parent catalog and every later step fails. **Fixed in this commit (Step 0).**
 
-## Recommended fixes (deferred, beyond trivial)
+## Polish fixes (applied in follow-up commit)
 
-- **lakehouse-redshift Path B**: document how to enable Redshift Serverless workgroup auto-mount, or remove Path B and recommend Path A only.
-- **cdc-streaming-pipeline §SUPER unnesting**: rewrite the array-unnest example with a runnable PartiQL `FROM cdc_events e, e.event_data."tags" t` form.
-- **cdc-streaming-pipeline §EventSourceMapping**: add `MaximumRecordAgeInSeconds` and DLQ `DestinationConfig.OnFailure` example.
-- **firehose-iceberg-pipeline**: verify `Lambda.UserBadResponse` errorCode name and CloudWatch metric names against current AWS docs; tighten Logs IAM resource pattern.
+All four deferred items addressed; doc-cited corrections from current AWS sources.
 
-## Fixes applied (this commit)
+- **lakehouse-redshift Path B**: rewrote with the actual enable mechanism — `ALTER SYSTEM SET data_catalog_auto_mount = on` (an in-database system parameter, not a `redshift-serverless update-workgroup` flag) plus a workgroup pause/resume cycle. Added the per-caller `GRANT USAGE ON DATABASE awsdatacatalog` plus LF grants on the caller's IAM role. Added a hard caveat: Path B works only for federated-IAM connections (Query Editor v2, JDBC with `GetCredentials`); DB-user/admin-password sessions cannot resolve `awsdatacatalog`. Default recommendation is now Path A; Path B reserved for human Query Editor v2 use.
+- **cdc-streaming-pipeline §SUPER unnesting**: replaced the broken `WHERE element IN (SELECT ...)` example with the canonical PartiQL cross-join form (`FROM cdc_events AS e, e.event_data."tags" AS t`), plus an arrays-of-objects variant, plus the `enable_case_sensitive_identifier` session prerequisite.
+- **cdc-streaming-pipeline EventSourceMapping reference**: added `MaximumRecordAgeInSeconds: 21600` (6h cap), real `DestinationConfig.OnFailure` wired to a new `CdcDlq` SQS resource (14d retention) with the note that DLQ messages are pointers, not records, so replay requires re-reading the stream.
+- **firehose-iceberg-pipeline**: replaced `Lambda.UserBadResponse`/`BadRequest` (not real codes) with the documented set: `Lambda.JsonProcessingException`, `Lambda.MissingRecordId`, `Lambda.DuplicatedRecordId`. Replaced `DeliveryToLambdaFailedRecords`/`DeliveryToIcebergRecords`/`DeliveryToIcebergFailedRecords` (not real metrics) with the canonical `DeliveryToIceberg.SuccessfulRowCount`, `DeliveryToIceberg.FailedRowCount`, and `ExecuteProcessingFailure.Records`. Tightened the Logs IAM resource ARN to `${FirehoseLogGroup.Arn}:log-stream:*` (the canonical stream-level ARN form).
+
+## Initial-commit fixes (parent commit)
 
 - `cdc-streaming-pipeline/SKILL.md`: trust policy now uses `ArnLike` with `${ClusterArn}/stream/*`; Kinesis IAM action set to `DescribeStreamSummary` + `ListShards`; added `Version: "2012-10-17"` to inline PolicyDocument.
 - `lakehouse-redshift/SKILL.md`: added bucket-nested catalog DESCRIBE grant to inline Path A example; added warning callout that `DROP SCHEMA ... CASCADE` drops dependent views; fixed the Python admin-merge snippet to filter the literal `'None'` returned by `--output text` on empty fields; added Step 0 to "Putting it together" calling out the one-time S3 Tables to Lake Formation integration enable prerequisite.
 
 ## Publish-readiness call
 
-**YELLOW** — all open-source-security reviews pass and all hard constraints are clean. The three high/medium correctness blockers (cdc trust policy, kinesis action, lakehouse catalog grant, lakehouse Step 0) are fixed in this commit. Remaining items are quality polish (Path B auto-mount docs, SUPER unnesting example, Firehose metric/errorCode verification) and can land in a follow-up before broad publish.
+**GREEN** — all open-source-security reviews pass, all hard constraints clean, all reviewer-flagged correctness blockers fixed, all deferred quality-polish items addressed with doc-cited corrections.

@@ -65,14 +65,35 @@ Resources:
       # the record expires from the stream after up to 24h).
       MaximumRetryAttempts: 5
 
+      # Cap how long a record can be retried before it is moved to the
+      # DLQ (or dropped, if no DLQ). Without this, a record that keeps
+      # failing for transient reasons (Redshift unavailability, etc.)
+      # can hold up shard progress for the full Kinesis retention window
+      # (up to 24h on a Standard stream). 6h is generous for a CDC
+      # pipeline; tighten if you have stricter freshness SLAs.
+      MaximumRecordAgeInSeconds: 21600
+
       # On error, retry with each half of the batch separately. Isolates
       # poison records quickly without re-processing the whole batch.
       BisectBatchOnFunctionError: true
 
+      # Send permanently-failed batches to an SQS DLQ. Each DLQ message
+      # is a *pointer* (stream ARN + shard ID + sequence numbers), not
+      # the original records. Replay requires reading the stream again
+      # at the recorded position. The Lambda execution role does not
+      # need any DLQ permission; the Lambda service writes to the DLQ.
+      DestinationConfig:
+        OnFailure:
+          Destination: !GetAtt CdcDlq.Arn
+
       Enabled: true
 
-      # Optional but recommended for production: send permanently-failed
-      # batches to a DLQ for inspection.
-      # DestinationConfig:
-      #   OnFailure:
-      #     Destination: !GetAtt CdcDlq.Arn
+  # SQS DLQ for permanently-failed batches. SQS is the simplest target
+  # for OnFailure; SNS is also supported if you want fan-out alerting.
+  # Long retention so an operator can investigate at their own pace.
+  CdcDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-cdc-dlq"
+      MessageRetentionPeriod: 1209600  # 14 days, the SQS max
+      VisibilityTimeout: 60

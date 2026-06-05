@@ -124,7 +124,12 @@ only the metadata path):
         Action:
           - logs:CreateLogStream
           - logs:PutLogEvents
-        Resource: !GetAtt FirehoseLogGroup.Arn
+        # CreateLogStream and PutLogEvents are stream-level actions; the
+        # canonical resource ARN is the log-group ARN with a
+        # :log-stream:* suffix. The bare LogGroup.Arn alone is the
+        # log-group resource type and CloudWatch Logs may reject it
+        # under strict-mode IAM evaluation.
+        Resource: !Sub "${FirehoseLogGroup.Arn}:log-stream:*"
 ```
 
 ## Inline policy 6: invoke transform Lambda

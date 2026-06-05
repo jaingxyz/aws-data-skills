@@ -591,12 +591,58 @@ A few rules of thumb:
   cannot consume directly.
 - Nested fields: `event_data."address"."city"::VARCHAR`. Deeper
   subscripting works.
-- Arrays: `event_data."tags"[0]::VARCHAR`. Array unrolling is via
-  `WHERE element IN (SELECT ... FROM cdc_events e, e.event_data."tags" t)`.
 
-When NOT to use SUPER: if your source schema is fixed and small, plain
-typed columns are simpler and faster to query. SUPER's value comes from
-schema-drift absorption.
+### Unnesting SUPER arrays with PartiQL
+
+Redshift's PartiQL extension lets you treat a SUPER array as a virtual
+table on the right-hand side of `FROM`, joining it row-by-element with
+its parent. The pattern is to comma-cross-join the source row with its
+array field and bind a per-element alias:
+
+```sql
+-- Suppose event_data has a "tags" array, e.g.
+--   event_data = {"id": "...", "tags": ["vip","new"]}
+SELECT
+    e.record_id,
+    e.commit_timestamp,
+    t::VARCHAR  AS tag
+FROM cdc_events AS e, e.event_data."tags" AS t
+WHERE e.source_table = 'orders';
+```
+
+Output: one row per (event, tag) pair. The `t::VARCHAR` cast produces a
+scalar; without it `t` stays SUPER.
+
+For arrays of objects:
+
+```sql
+-- event_data = {"id": "...", "items": [{"sku":"A","qty":2}, ...]}
+SELECT
+    e.record_id,
+    item."sku"::VARCHAR AS sku,
+    item."qty"::INT     AS qty
+FROM cdc_events AS e, e.event_data."items" AS item
+WHERE e.source_table = 'orders';
+```
+
+Two requirements specific to PartiQL on Redshift:
+
+- The session must enable case-sensitive identifiers when subscripting
+  mixed-case JSON keys: `SET enable_case_sensitive_identifier TO TRUE;`
+  (set this once per session, or use unquoted lowercase keys only).
+- PartiQL unnesting works inside views too. Combine it with
+  `WITH NO SCHEMA BINDING` if the view also references external Iceberg
+  tables; see the `lakehouse-redshift` skill.
+
+If you only need a single element by index, no unnest required:
+`event_data."tags"[0]::VARCHAR`.
+
+### When NOT to use SUPER
+
+If your source schema is fixed and small, plain typed columns are
+simpler and faster to query. SUPER's value comes from schema-drift
+absorption; if there is no drift, you are paying SUPER's small overhead
+for nothing.
 
 ## 6. Cross-references
 

@@ -259,21 +259,62 @@ After deploying, query as:
 SELECT COUNT(*) FROM cold.<table-name>;
 ```
 
-### Path B: `awsdatacatalog` auto-mount via 3-part naming (LF mode only)
+### Path B: `awsdatacatalog` auto-mount via 3-part naming (LF mode + federated identity only)
 
-If the bucket is in LF mode and the Redshift Serverless workgroup has the federated catalog auto-mount enabled, you can skip the resource link and `CREATE EXTERNAL SCHEMA` entirely. Just query:
+If the bucket is in LF mode AND your Redshift Serverless workgroup has the in-database `data_catalog_auto_mount` system parameter set, AND your callers connect with a **federated IAM identity** (Query Editor v2 "Federated user" sign-in, or JDBC/ODBC with `redshift-serverless:GetCredentials`), you can skip the resource link and `CREATE EXTERNAL SCHEMA` entirely. Just query:
 
 ```sql
 SELECT COUNT(*) FROM "<bucket>@s3tablescatalog".<namespace>.<table>;
 ```
 
-You still need the IAM role attached to the namespace to have `glue:Get*` and `s3tables:Get*` and `lakeformation:GetDataAccess`, plus LF grants on the database and table for that role principal. Same grant commands as Path A, just no resource link.
+#### Enabling auto-mount
+
+Auto-mount is **not** a `redshift-serverless update-workgroup` flag. It is an in-database system parameter that you set via SQL on the workgroup, then bounce compute:
+
+```sql
+-- Connect as admin (Data API or Query Editor v2 admin connection),
+-- run on the dev database (or any database in the namespace).
+ALTER SYSTEM SET data_catalog_auto_mount = on;
+SHOW data_catalog_auto_mount;   -- expect: on
+```
+
+The change takes effect on the **next compute cycle** (auto-pause and resume of the workgroup). Force a cycle by waiting past the idle timeout, or by toggling `--max-capacity` to a new value and back via `aws redshift-serverless update-workgroup`. After the cycle, `awsdatacatalog` becomes visible to federated-IAM connections.
+
+#### Per-caller grants (in addition to the namespace IAM role's permissions)
+
+Auto-mount alone is not enough; the **federated identity making the query** also needs:
+
+1. **In-database grant** on the auto-mounted database (one-time per principal):
+
+   ```sql
+   GRANT USAGE ON DATABASE awsdatacatalog TO "IAMR:<caller-role-name>";
+   ```
+
+2. **Lake Formation grants** on the namespace and table for the caller's IAM role (mirrors Path A's grants, but the principal is the caller's role, not the namespace's role):
+
+   ```bash
+   aws lakeformation grant-permissions \
+     --principal DataLakePrincipalIdentifier=<caller-role-arn> \
+     --resource '{"Database":{"CatalogId":"<account-id>:s3tablescatalog/<bucket-name>","Name":"<namespace>"}}' \
+     --permissions DESCRIBE
+   aws lakeformation grant-permissions \
+     --principal DataLakePrincipalIdentifier=<caller-role-arn> \
+     --resource '{"Table":{"CatalogId":"<account-id>:s3tablescatalog/<bucket-name>","DatabaseName":"<namespace>","Name":"<table>"}}' \
+     --permissions SELECT DESCRIBE
+   ```
+
+#### Path B caveats
+
+- The `<bucket>@s3tablescatalog` identifier must be **double-quoted** in psql, JDBC, and most clients because of the `@`. Query Editor v2 quotes it for you.
+- **DB-user / admin-password connections cannot use Path B.** They cannot resolve `awsdatacatalog` at all; the identity must be IAM-federated (Query Editor v2 "Federated user", or `GetCredentials` flow). If your pipeline writes via the Redshift Data API as the admin user, the deploy script itself cannot use Path B; reserve Path B for human users hitting Query Editor v2.
+- Auto-mount honors only the **default Glue Data Catalog of the workgroup's account and Region**. Cross-account S3 Tables still require a Path A resource link.
 
 ### Which to recommend
 
-- **If the user already has IAM-mode buckets they cannot switch**: Path A. Path B will not work without a mode switch.
-- **If LF mode account-wide is acceptable**: Path B is one fewer moving part (no resource link to maintain). Use Path A only if you want the schema to look like a normal Redshift schema (`cold.events`) instead of a quoted catalog identifier.
-- **In doubt, default to Path A.** It is more portable and matches the pattern most existing AWS samples document. The source repo for this skill ships Path A.
+- **If your only consumer is a federated human user via Query Editor v2** and LF mode is acceptable account-wide: Path B is one fewer moving part (no resource link, no `CREATE EXTERNAL SCHEMA`).
+- **If your pipeline does any DDL or queries from Lambda / Data API / DB-user sessions**: Path A. Path B will not resolve `awsdatacatalog` for non-federated identities, so the same data has to be exposed via Path A anyway. Maintaining only Path A is simpler.
+- **If the user already has IAM-mode buckets they cannot switch**: Path A. Path B requires LF mode.
+- **In doubt, default to Path A.** It works for every caller type, matches the pattern most existing AWS samples document, and is what the source repo for this skill ships.
 
 ## Lake Formation operational gotchas
 

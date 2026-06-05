@@ -239,9 +239,9 @@ inline policy on the Firehose role:
         Resource: !GetAtt TransformLambda.Arn
 ```
 
-If you forget this, Firehose health metrics show
-`DeliveryToLambdaFailedRecords > 0` and the CloudWatch log stream for
-the delivery shows `is not authorized to perform: lambda:InvokeFunction`.
+If you forget this, the `ExecuteProcessingFailure.Records` metric goes
+non-zero and the CloudWatch log stream for the delivery shows
+`is not authorized to perform: lambda:InvokeFunction`.
 
 ## Iceberg timestamp gotcha: MICROSECONDS, not milliseconds
 
@@ -533,12 +533,19 @@ Common `errorCode` values and what they mean:
 | `Iceberg.AccessDenied`                 | Firehose role missing `s3tables:PutTableData` or LF table ALL.                       |
 | `Lambda.InvokeAccessDenied`            | Firehose role missing `lambda:InvokeFunction` on the transform.                      |
 | `Lambda.FunctionInvocationTimeout`     | Transform exceeded its timeout. Default Firehose cap on transform invocation is 5min.|
-| `Lambda.UserBadResponse` / `BadRequest`| Transform returned the wrong shape. Each output record needs `recordId` + `result`.  |
+| `Lambda.JsonProcessingException`       | Transform output is not valid JSON in the Firehose response shape.                   |
+| `Lambda.MissingRecordId`               | Transform output dropped or renamed the input `recordId`. It must be echoed verbatim.|
+| `Lambda.DuplicatedRecordId`            | Same `recordId` appeared twice in the transform output. Each input must map to one.  |
 
-Set a CloudWatch alarm on
-`AWS/Firehose / DeliveryToIcebergRecords` (zero) plus
-`DeliveryToIcebergFailedRecords` (>0) so a regression in record shape
-fires an alarm rather than silently filling the error bucket.
+Set CloudWatch alarms in the `AWS/Firehose` namespace per the
+[Iceberg metrics reference](https://docs.aws.amazon.com/firehose/latest/dev/apache-iceberg-metric.html):
+
+- `DeliveryToIceberg.SuccessfulRowCount` going to zero while
+  `IncomingRecords` is non-zero means delivery has stalled.
+- `DeliveryToIceberg.FailedRowCount > 0` means records are landing in
+  the error bucket; pair this with an alarm on
+  `ExecuteProcessingFailure.Records > 0` to catch the transform-Lambda
+  failure mode separately from the Iceberg-write failure mode.
 
 ## Cross-references
 

@@ -1,0 +1,78 @@
+# Reference: Kinesis -> Lambda EventSourceMapping for a CDC consumer.
+#
+# Targets Redshift Serverless via the Redshift Data API. Every parameter
+# below has a reason; comments call out what each one prevents.
+#
+# Drop this into the Resources section of a CloudFormation template that
+# also defines the Kinesis stream (CdcStream), the Lambda function
+# (CdcProcessorFunction), and the Lambda execution role.
+
+Resources:
+
+  CdcProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-processor"
+      Runtime: python3.11
+      Handler: cdc_processor.lambda_handler
+      Role: !GetAtt LambdaExecRole.Arn
+      # Headroom for synchronous Redshift describe-statement polling.
+      # Worst case: ceil(BatchSize / ROWS_PER_CHUNK) * STATEMENT_POLL_TIMEOUT_S
+      # plus boto3 RTT overhead. With BatchSize=100, ROWS_PER_CHUNK=40,
+      # STATEMENT_POLL_TIMEOUT_S=20, that is 3 * 20 = 60s + overhead.
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          REDSHIFT_WORKGROUP: !Ref RedshiftWorkgroup
+          REDSHIFT_DATABASE: dev
+          # 200-param Data API cap / 5 params per row = 40 rows max.
+          ROWS_PER_CHUNK: "40"
+          STATEMENT_POLL_TIMEOUT_S: "20"
+      Code:
+        ZipFile: |
+          # PLACEHOLDER. Real code is deployed by a follow-up script.
+          # Raise (not return). If Kinesis ever invokes this placeholder,
+          # returning 200 would silently advance the iterator past CDC
+          # events that never made it to Redshift. Raising forces the
+          # EventSourceMapping to retry and surfaces the misconfiguration
+          # in CloudWatch.
+          def lambda_handler(event, context):
+              raise RuntimeError(
+                  "Placeholder Lambda code is running. "
+                  "Deploy the real handler before enabling the event source."
+              )
+
+  CdcEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt CdcStream.Arn
+      FunctionName: !Ref CdcProcessorFunction
+
+      # LATEST: start at tail. Use TRIM_HORIZON for backfill-from-stream
+      # scenarios. AT_TIMESTAMP if you need a specific resume point.
+      StartingPosition: LATEST
+
+      # BatchSize: max records delivered per invocation. The Lambda chunks
+      # internally to stay within Redshift Data API's 200-parameter limit
+      # (40 records * 5 params each). Values up to ~400 work but increase
+      # tail latency on partial batches.
+      BatchSize: 100
+      MaximumBatchingWindowInSeconds: 5
+
+      # Operational resilience. Bound retries on poison records so they
+      # don't block shard processing forever (default would retry until
+      # the record expires from the stream after up to 24h).
+      MaximumRetryAttempts: 5
+
+      # On error, retry with each half of the batch separately. Isolates
+      # poison records quickly without re-processing the whole batch.
+      BisectBatchOnFunctionError: true
+
+      Enabled: true
+
+      # Optional but recommended for production: send permanently-failed
+      # batches to a DLQ for inspection.
+      # DestinationConfig:
+      #   OnFailure:
+      #     Destination: !GetAtt CdcDlq.Arn

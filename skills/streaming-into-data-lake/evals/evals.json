@@ -1,0 +1,465 @@
+{
+  "skill_name": "streaming-into-data-lake",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "firehose-kinesis-to-s3-tables-iceberg",
+      "prompt": "Set up a Firehose pipeline to write to S3 Tables Iceberg. Source is a Kinesis Data Stream called 'orders-stream'. Target is an Iceberg table 'orders' in the 'sales' namespace of the 'analytics-data' table bucket.",
+      "expected_output": "Walks through preconditions (table exists, LF admin, region supported), surfaces the column-mapping footgun, requires a transform Lambda for DestinationDatabaseName/DestinationTableName metadata, and recommends the three-phase deploy (table + LF grants -> stream -> source binding).",
+      "assertions": [
+        {
+          "text": "Surfaces the Iceberg column-mapping footgun (Firehose cannot route records into Iceberg without per-record routing metadata)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "column",
+              "column-mapping",
+              "column mapping",
+              "MissingColumn",
+              "routing metadata",
+              "DestinationDatabaseName",
+              "DestinationTableName"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Requires a transform Lambda to inject routing metadata before delivery",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "transform Lambda",
+              "transformation Lambda",
+              "ProcessingConfiguration",
+              "Lambda transform",
+              "data transformation"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Recommends a three-phase deploy (table + LF grants first, then Firehose stream, then source binding)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "three-phase",
+              "three phase",
+              "phase 1",
+              "phase 2",
+              "phase 3",
+              "EnableFirehose",
+              "EnableFirehoseStream"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Verifies the Iceberg table already exists before creating the stream",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "table exists",
+              "GetTable",
+              "get-table",
+              "creating-data-lake-table",
+              "table must exist",
+              "precondition"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Mentions Lake Formation admin or LF grants as a precondition",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "Lake Formation",
+              "LakeFormation",
+              "LF admin",
+              "lf-admin",
+              "data lake admin",
+              "LF grant",
+              "LF grants"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT instruct the user to point Firehose directly at S3 Tables without a transform",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "no transform needed",
+              "transform is optional",
+              "without a transform",
+              "skip the transform"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "diagnose-iceberg-failed-error-prefix",
+      "prompt": "Why are 100% of my Firehose records landing in errors/iceberg-failed/? Stream name is 'orders-firehose' and the target is an Iceberg table on S3 Tables.",
+      "expected_output": "Walks through base64-decoding rawData, identifies errorCode=Iceberg.MissingColumnWithinRecord, traces it to missing routing metadata, and prescribes a transform Lambda fix.",
+      "assertions": [
+        {
+          "text": "Instructs the user to inspect a record under errors/iceberg-failed/ and base64-decode rawData",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "rawData",
+              "base64",
+              "decode",
+              "errorOutput",
+              "error record",
+              "error file"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Identifies errorCode=Iceberg.MissingColumnWithinRecord as the diagnostic signal",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "MissingColumnWithinRecord",
+              "Iceberg.MissingColumn",
+              "MissingColumn",
+              "missing column"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Traces the root cause to absent routing metadata (DestinationDatabaseName / DestinationTableName)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "DestinationDatabaseName",
+              "DestinationTableName",
+              "routing metadata",
+              "metadata",
+              "database name",
+              "table name"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Prescribes a transform Lambda fix that injects the routing metadata",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "transform Lambda",
+              "transformation Lambda",
+              "ProcessingConfiguration",
+              "Lambda transform",
+              "inject"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT tell the user the table schema is wrong (the schema is fine, the records lack metadata)",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "alter the table",
+              "ALTER TABLE",
+              "drop and recreate",
+              "DROP TABLE",
+              "schema mismatch in the table"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "iceberg-timestamp-microsecond-conversion",
+      "prompt": "My Iceberg timestamps are wrong. Source records carry an event_time field as Unix epoch milliseconds, but the values in the Iceberg table look like they're around 1970. What gives?",
+      "expected_output": "Identifies that Iceberg timestamp values are microseconds since epoch, not milliseconds. Recommends multiplying ms x 1000 in the transform Lambda before delivery.",
+      "assertions": [
+        {
+          "text": "Identifies that Iceberg expects microseconds since epoch, not milliseconds",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "microsecond",
+              "micros",
+              "microseconds since epoch",
+              "us since epoch",
+              "1e6",
+              "* 1000",
+              "x 1000",
+              "multiply by 1000"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Specifies the conversion factor (multiply ms by 1000 to get microseconds)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "* 1000",
+              "x 1000",
+              "multiply by 1000",
+              "1000x",
+              "ms * 1000",
+              "1_000"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Locates the fix in the transform Lambda (where records are reshaped before delivery)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "transform Lambda",
+              "transformation Lambda",
+              "ProcessingConfiguration",
+              "Lambda transform",
+              "in the transform"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT recommend changing the Iceberg column type to bigint or string",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "change the column type",
+              "alter the column",
+              "use bigint",
+              "store as string",
+              "switch to bigint"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "lake-formation-grants-before-firehose",
+      "prompt": "I'm getting AccessDenied on glue:GetTable when creating my Firehose stream. The Firehose role already has glue:GetTable in its IAM policy. What am I missing?",
+      "expected_output": "Identifies that Lake Formation governs S3 Tables, so IAM policies are not enough. Requires LF DESCRIBE/SELECT/INSERT grants on the table to the Firehose role before stream creation. Mentions the lf_grant pattern.",
+      "assertions": [
+        {
+          "text": "Identifies that Lake Formation, not just IAM, governs access to S3 Tables",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "Lake Formation",
+              "LakeFormation",
+              "LF",
+              "lakeformation",
+              "Lake Formation governs",
+              "LF governs"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Specifies that LF grants must be issued to the Firehose role (DESCRIBE / SELECT / INSERT on the table)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "DESCRIBE",
+              "SELECT",
+              "INSERT",
+              "grant-permissions",
+              "GrantPermissions",
+              "lf grant",
+              "LF grant",
+              "data lake permissions"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Specifies that LF grants must exist BEFORE the Firehose stream is created (ordering matters)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "before",
+              "first",
+              "prior to",
+              "phase 1",
+              "ordering",
+              "race",
+              "before creating"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "References the lf_grant pattern or equivalent helper for issuing the grant",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "lf_grant",
+              "lf-grant",
+              "lakeformation grant-permissions",
+              "GrantPermissions",
+              "LF grant pattern"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT suggest only fixing the IAM policy as the resolution",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "only the IAM policy",
+              "just add IAM",
+              "IAM policy is enough",
+              "just IAM permissions"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "eval_name": "kinesis-to-iceberg-need-transform-yes",
+      "prompt": "I'm wiring Kinesis Data Streams into an Iceberg table on S3 Tables via Firehose. Do I need a transform Lambda?",
+      "expected_output": "Leads with YES, transform Lambda is required. Explains the column-mapping footgun: Iceberg destination needs per-record DestinationDatabaseName / DestinationTableName routing metadata that source records do not carry.",
+      "assertions": [
+        {
+          "text": "Leads with a clear YES (transform Lambda is required)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "Yes",
+              "YES",
+              "yes,",
+              "yes you",
+              "yes you do",
+              "yes -"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Surfaces the Iceberg column-mapping footgun as the reason",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "column-mapping",
+              "column mapping",
+              "MissingColumn",
+              "routing metadata",
+              "DestinationDatabaseName",
+              "DestinationTableName"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Explains that source records do not carry the required routing metadata by default",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "source records",
+              "raw records",
+              "do not carry",
+              "missing",
+              "by default",
+              "unless"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Mentions Firehose ProcessingConfiguration or the Lambda transform invocation point",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "ProcessingConfiguration",
+              "transform Lambda",
+              "transformation Lambda",
+              "Lambda transform",
+              "Processors"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT tell the user a transform is optional or unnecessary",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "no, you don't need",
+              "transform is optional",
+              "no transform required",
+              "you can skip the transform",
+              "transform is not required"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    }
+  ],
+  "_phase3_todo": "Replace placeholder baseline.json after live eval runs against 3 models (Sonnet 4.5, Sonnet 4.6, Opus 4.6) x 3 runs per case, per the AWS MCP Skill Publishing Process eval gate."
+}

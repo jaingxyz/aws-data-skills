@@ -1,12 +1,14 @@
 # aws-data-skills
 
+[![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
+
 Three independent, composable skills for building data pipelines on AWS.
 
 ## Skills
 
-- **lakehouse-redshift** — Query and operate a Redshift Serverless lakehouse with Iceberg/S3 Tables integration.
-- **cdc-streaming-pipeline** — Stand up a change-data-capture pipeline (Aurora DSQL → Kinesis → Lambda → Redshift).
-- **firehose-iceberg-pipeline** — Ingest streaming data into Apache Iceberg tables on S3 via Amazon Data Firehose.
+- **lakehouse-redshift** - Query and operate a Redshift Serverless lakehouse with Iceberg/S3 Tables integration.
+- **cdc-streaming-pipeline** - Stand up a change-data-capture pipeline (Aurora DSQL -> Kinesis -> Lambda -> Redshift).
+- **firehose-iceberg-pipeline** - Ingest streaming data into Apache Iceberg tables on S3 via Amazon Data Firehose.
 
 ## Format
 

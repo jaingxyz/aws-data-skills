@@ -1,0 +1,396 @@
+{
+  "skill_name": "dsql-to-analytics-pipeline",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "real-time-dsql-to-redshift-pipeline",
+      "prompt": "Build a real-time DSQL to Redshift pipeline. I have an Aurora DSQL cluster with orders, customers, and order_items tables and I want to analyze them in Redshift Serverless with low latency.",
+      "expected_output": "Recommends DSQL CDC stream -> Kinesis -> Lambda -> Redshift Serverless with an append-only cdc_events log and ROW_NUMBER reconstruction views, not in-place upserts.",
+      "assertions": [
+        {
+          "text": "Recommends the DSQL CDC stream as the source (not polling or app-level dual-writes)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "CDC stream",
+              "cdc stream",
+              "DSQL CDC",
+              "change data capture",
+              "Kinesis"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Recommends an append-only event log (cdc_events table) over in-place upserts",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "append-only",
+              "append only",
+              "cdc_events",
+              "event log"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Reconstructs current state with ROW_NUMBER over commit_timestamp DESC (not MERGE/UPSERT in the hot path)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "ROW_NUMBER",
+              "row_number",
+              "PARTITION BY",
+              "commit_timestamp",
+              "latest commit"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT propose in-place MERGE/UPSERT as the primary pattern",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "MERGE INTO",
+              "primary pattern is upsert",
+              "use UPSERT in the Lambda"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Mentions Lambda event source mapping with Kinesis as the consumer",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "event source mapping",
+              "EventSourceMapping",
+              "Lambda",
+              "consumer"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "missing-update-events-c-and-d-preview",
+      "prompt": "Why are my DSQL UPDATE events missing from Redshift? I'm running the CDC pipeline and I see inserts and deletes downstream but no update operations show up in cdc_events.op.",
+      "expected_output": "Explains the DSQL CDC preview limitation that both INSERT and UPDATE arrive as op='c' (no 'u'), and shows that the latest-commit-timestamp reconstruction handles this correctly without code changes.",
+      "assertions": [
+        {
+          "text": "Explains DSQL CDC preview emits only c and d ops (no u)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "only c and d",
+              "c' and 'd",
+              "no 'u'",
+              "no u op",
+              "INSERT and UPDATE arrive as",
+              "both INSERT and UPDATE",
+              "preview"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Clarifies UPDATE shows up as op='c', not as a missing event",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "as 'c'",
+              "as c",
+              "op='c'",
+              "op = 'c'",
+              "create",
+              "treated as create"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Explains the latest-commit-timestamp reconstruction correctly handles c-as-update",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "ROW_NUMBER",
+              "row_number",
+              "commit_timestamp",
+              "latest",
+              "most recent",
+              "DESC"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT recommend filtering for op='u' or treating updates as a bug to file",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "filter for op='u'",
+              "filter op = 'u'",
+              "WHERE op = 'u'"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "dsql-to-s3-tables-iceberg-cross-reference",
+      "prompt": "I want to stream DSQL changes to S3 Tables Iceberg instead of Redshift. How do I wire that up?",
+      "expected_output": "Cross-references the streaming-into-data-lake skill for Firehose/Iceberg specifics and explains the transform Lambda that flattens the CDC envelope. Does not duplicate Firehose-specific advice.",
+      "assertions": [
+        {
+          "text": "Delegates Firehose/Iceberg specifics to streaming-into-data-lake skill",
+          "category": "delegation",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "streaming-into-data-lake",
+              "streaming into data lake",
+              "sibling skill",
+              "data-analytics plugin"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Explains the transform Lambda flattens the CDC envelope so top-level keys map to Iceberg columns",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "transform Lambda",
+              "flatten",
+              "envelope",
+              "top-level",
+              "top level"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Mentions S3 Tables or Iceberg as the sink target",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "S3 Tables",
+              "s3 tables",
+              "Iceberg",
+              "iceberg"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT duplicate Firehose-specific configuration details (buffering, dynamic partitioning syntax, error output prefixes)",
+          "category": "delegation",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "BufferingHints",
+              "DynamicPartitioningConfiguration",
+              "ErrorOutputPrefix",
+              "buffer hints"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "redshift-data-api-200-param-limit",
+      "prompt": "My Lambda is failing with 'Number of parameters in statement exceeds maximum allowed (200)' when writing CDC events to Redshift. What's going on and how do I fix it?",
+      "expected_output": "Explains the Redshift Data API 200-parameter-per-statement cap, shows the chunking math (200 / params_per_row), and recommends ROWS_PER_CHUNK at or below that ceiling.",
+      "assertions": [
+        {
+          "text": "Identifies the Redshift Data API 200-parameter cap as the root cause",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "200 parameter",
+              "200-parameter",
+              "200 params",
+              "parameter limit",
+              "parameter cap",
+              "max 200"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Shows the chunking math: 200 / params_per_row",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "200 / ",
+              "200/",
+              "params_per_row",
+              "params per row",
+              "MAX_PARAMS_PER_STATEMENT",
+              "ROWS_PER_CHUNK"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Recommends lowering ROWS_PER_CHUNK or chunking the batch before execute_statement",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "ROWS_PER_CHUNK",
+              "chunk",
+              "lower the batch",
+              "smaller batch",
+              "split"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT recommend raising the limit (it is a hard service limit) or string-concatenating values to dodge it",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "raise the limit",
+              "request a higher limit",
+              "concatenate values",
+              "string concatenation",
+              "f-string the SQL"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "eval_name": "consumer-lambda-silently-dropping-records",
+      "prompt": "My DSQL CDC consumer Lambda looks like it's silently dropping records. Kinesis advances past data that never lands in Redshift. The Lambda logs show no errors. What did I get wrong?",
+      "expected_output": "Identifies the async nature of execute_statement, explains that describe_statement must be polled until FINISHED, and that FAILED/ABORTED must re-raise so Kinesis retries the batch.",
+      "assertions": [
+        {
+          "text": "Identifies execute_statement as async (returns a statement Id, not the result)",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "execute_statement is async",
+              "asynchronous",
+              "returns immediately",
+              "statement Id",
+              "statement id",
+              "fire and forget"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Recommends polling describe_statement until each chunk reaches FINISHED",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "describe_statement",
+              "DescribeStatement",
+              "poll",
+              "FINISHED"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Recommends raising on FAILED/ABORTED so Kinesis retries the batch",
+          "category": "correctness",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "FAILED",
+              "ABORTED",
+              "raise",
+              "re-raise",
+              "retry",
+              "Kinesis retries",
+              "event source mapping retries"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Warns that skipping the poll lets Kinesis advance past lost data (silent data loss)",
+          "category": "safety",
+          "check": {
+            "type": "contains_any",
+            "values": [
+              "silent",
+              "advance past",
+              "data loss",
+              "lost data",
+              "checkpoint past",
+              "Kinesis advances"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        },
+        {
+          "text": "Does NOT recommend swallowing exceptions or logging-and-continuing on FAILED",
+          "category": "safety",
+          "check": {
+            "type": "not_contains",
+            "values": [
+              "swallow the exception",
+              "log and continue",
+              "ignore the error",
+              "except: pass"
+            ]
+          },
+          "passed": null,
+          "evidence": ""
+        }
+      ]
+    }
+  ]
+}

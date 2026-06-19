@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # GitHub Actions versions. Workflows pin to commit SHAs; Dependabot bumps the
+  # SHA (and its version comment) in lockstep with the tag's underlying commit.
+  # No application package manifest lives in this repo (skills are docs plus
+  # illustrative reference snippets), so there is no pip/npm ecosystem to track.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore
+      include: scope

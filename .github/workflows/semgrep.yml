@@ -1,0 +1,31 @@
+name: Semgrep
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: SAST scan
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+
+      - name: Run Semgrep CI
+        run: |
+          semgrep ci \
+            --config p/python \
+            --config p/security-audit \
+            --config p/owasp-top-ten \
+            --config p/cloudformation \
+            --config p/bash
